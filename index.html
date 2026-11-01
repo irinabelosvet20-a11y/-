@@ -1,0 +1,264 @@
+html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тренажер Азбука</title>
+    <!-- Подключаем скрипт Telegram для интеграции -->
+    <script src="https://telegram.org"></script>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* Экран настроек */
+        .screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            padding: 20px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        h1 {
+            font-size: 28px;
+            margin-bottom: 30px;
+            color: #4CAF50;
+            text-align: center;
+        }
+
+        .setting-group {
+            width: 100%;
+            max-width: 300px;
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            font-size: 16px;
+            margin-bottom: 10px;
+            color: #ccc;
+        }
+
+        .value-display {
+            font-weight: bold;
+            color: #2196F3;
+            float: right;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 25px;
+            cursor: pointer;
+            margin-top: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: background 0.2s;
+        }
+
+        .btn:active {
+            background-color: #45a049;
+        }
+
+        /* Игровой экран */
+        #game-screen {
+            position: relative;
+        }
+
+        .timer-bar {
+            position: absolute;
+            top: 20px;
+            font-size: 20px;
+            color: #888;
+            font-weight: bold;
+        }
+
+        .letter {
+            font-size: 140px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #4CAF50;
+            line-height: 1;
+        }
+
+        .command {
+            font-size: 90px;
+            font-weight: bold;
+            color: #2196F3;
+            line-height: 1;
+        }
+
+        /* Экран завершения */
+        .finished-text {
+            font-size: 24px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ЭКРАН НАСТРОЕК -->
+    <div id="settings-screen" class="screen">
+        <h1>Тренажер «Азбука»</h1>
+        
+        <div class="setting-group">
+            <label>Интервал смены: <span id="speed-val" class="value-display">2.0 сек</span></label>
+            <input type="range" id="speed-range" min="1" max="4" step="0.5" value="2">
+        </div>
+
+        <div class="setting-group">
+            <label>Время тренировки: <span id="duration-val" class="value-display">2 мин</span></label>
+            <input type="range" id="duration-range" min="1" max="5" step="1" value="2">
+        </div>
+
+        <button class="btn" onclick="startGame()">Начать</button>
+    </div>
+
+    <!-- ИГРОВОЙ ЭКРАН -->
+    <div id="game-screen" class="screen hidden">
+        <div class="timer-bar">Осталось: <span id="time-left">02:00</span></div>
+        <div class="letter" id="letter">—</div>
+        <div class="command" id="command">—</div>
+    </div>
+
+    <!-- ЭКРАН ОКОНЧАНИЯ -->
+    <div id="finish-screen" class="screen hidden">
+        <div class="finished-text">🎉 Отлично! Тренировка завершена.</div>
+        <button class="btn" onclick="showSettings()">В меню</button>
+    </div>
+
+    <script>
+        // Инициализация Telegram Web App
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        // Элементы интерфейса
+        const speedRange = document.getElementById('speed-range');
+        const speedVal = document.getElementById('speed-val');
+        const durationRange = document.getElementById('duration-range');
+        const durationVal = document.getElementById('duration-val');
+        
+        const settingsScreen = document.getElementById('settings-screen');
+        const gameScreen = document.getElementById('game-screen');
+        const finishScreen = document.getElementById('finish-screen');
+        
+        const letterEl = document.getElementById('letter');
+        const commandEl = document.getElementById('command');
+        const timeLeftEl = document.getElementById('time-left');
+
+        // Константы для игры
+        const alphabet = "АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЭЮЯ";
+        const commands = ["Л", "П", "О"];
+
+        // Игровые переменные таймеров
+        let gameInterval = null;
+        let countdownInterval = null;
+        let totalSecondsLeft = 0;
+
+        // Обновление ползунков в реальном времени
+        speedRange.addEventListener('input', (e) => {
+            speedVal.innerText = parseFloat(e.target.value).toFixed(1) + ' сек';
+        });
+
+        durationRange.addEventListener('input', (e) => {
+            durationVal.innerText = e.target.value + ' мин';
+        });
+
+        // Функция запуска игры
+        function startGame() {
+            settingsScreen.classList.add('hidden');
+            finishScreen.classList.add('hidden');
+            gameScreen.classList.remove('hidden');
+
+            const speedMs = parseFloat(speedRange.value) * 1000;
+            totalSecondsLeft = parseInt(durationRange.value) * 60;
+
+            updateTimerDisplay();
+            updateCard(); // Показываем первую букву сразу
+
+            // Таймер смены букв
+            gameInterval = setInterval(updateCard, speedMs);
+
+            // Общий таймер обратного отсчета тренировки
+            countdownInterval = setInterval(() => {
+                totalSecondsLeft--;
+                updateTimerDisplay();
+
+                if (totalSecondsLeft <= 0) {
+                    stopGame();
+                }
+            }, 1000);
+        }
+
+        // Функция обновления буквы и команды
+        function updateCard() {
+            const randomLetter = alphabet[Math.floor(Math.random() * alphabet.length)];
+            const randomCommand = commands[Math.floor(Math.random() * commands.length)];
+
+            letterEl.innerText = randomLetter;
+            commandEl.innerText = randomCommand;
+
+            // Виброотклик телефона при каждой смене буквы
+            if (tg.HapticFeedback) {
+                tg.HapticFeedback.impactOccurred('light');
+            }
+        }
+
+        // Форматирование времени (MM:SS)
+        function updateTimerDisplay() {
+            const minutes = Math.floor(totalSecondsLeft / 60);
+            const seconds = totalSecondsLeft % 60;
+            timeLeftEl.innerText = 
+                `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        // Функция остановки игры по истечении времени
+        function stopGame() {
+            clearInterval(gameInterval);
+            clearInterval(countdownInterval);
+            
+            gameScreen.classList.add('hidden');
+            finishScreen.classList.remove('hidden');
+
+            // Финальная длинная вибрация об успехе
+            if (tg.HapticFeedback) {
+                tg.HapticFeedback.notificationOccurred('success');
+            }
+        }
+
+        // Возврат на экран настроек
+        function showSettings() {
+            finishScreen.classList.add('hidden');
+            settingsScreen.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
